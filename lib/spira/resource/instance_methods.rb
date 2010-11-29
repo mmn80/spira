@@ -78,8 +78,13 @@ module Spira
       # @return [Hash{Symbol => Any}] attributes
       # @private
       def reload_attributes()
-        @statements = self.class.repository_or_fail.query(:subject => @subject)
         attributes = {}
+
+        # Load this object's statements cache
+        @statements = RDF::Repository.new
+        self.class.repository_or_fail.query(:subject => @subject).each do | statement |
+          @statements.insert(statement)
+        end
 
         # Set attributes for each statement corresponding to a predicate
         self.class.properties.each do |name, property|
