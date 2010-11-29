@@ -73,21 +73,6 @@ module Spira
       end
 
       ##
-      # Create and load a RDF::Repository to be used as statements cache
-      # for the life duration of this object.
-      #
-      # @private
-      def init_repository_for_statements()
-        if @statements.nil?
-          @statements = RDF::Repository.new
-          self.class.repository_or_fail.query(:subject => @subject).each do | statement |
-            @statements.insert(statement)
-          end
-        end
-        @statements
-      end
-
-      ##
       # Load this instance's attributes.  Overwrite loaded values with attributes in the given options.
       #
       # @return [Hash{Symbol => Any}] attributes
@@ -95,13 +80,14 @@ module Spira
       def reload_attributes()
         attributes = {}
 
-        init_repository_for_statements
+        # Load the statements cache repository
+        data
 
         # Set attributes for each statement corresponding to a predicate
         self.class.properties.each do |name, property|
           if self.class.is_list?(name)
             values = Set.new
-            collection = @statements.query(:subject => @subject, :predicate => property[:predicate]) unless @statements.empty?
+            collection = @data.query(:subject => @subject, :predicate => property[:predicate]) unless @data.empty?
             unless collection.nil?
               collection.each do |statement|
                 values << self.class.build_value(statement,property[:type], @cache)
@@ -109,7 +95,7 @@ module Spira
             end
             attributes[name] = values
           else
-            statement = @statements.query(:subject => @subject, :predicate => property[:predicate]).first unless @statements.empty?
+            statement = @data.query(:subject => @subject, :predicate => property[:predicate]).first unless @data.empty?
             attributes[name] = self.class.build_value(statement, property[:type], @cache)
           end
         end
@@ -490,14 +476,20 @@ module Spira
       alias_method :exist?, :exists?
     
       ##
-      # Returns an Enumerator of all RDF data for this subject, not just model data.
+      # Returns the internal RDF::Repository containing all RDF data for this subject,
+      # not just model data. If it wasn't loaded yet, it is loaded now.
       #
       # @see #each
-      # @see http://rdf.rubyforge.org/RDF/Enumerable.html
-      # @return [Enumerator]
+      # @see http://rdf.rubyforge.org/RDF/Repository.html
+      # @return [RDF::Repository]
       def data
-        init_repository_for_statements
-        @statements
+        if @data.nil?
+          @data = RDF::Repository.new
+          self.class.repository_or_fail.query(:subject => @subject).each do | statement |
+            @data.insert(statement)
+          end
+        end
+        @data
       end
 
       ##
