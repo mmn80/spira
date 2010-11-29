@@ -73,6 +73,21 @@ module Spira
       end
 
       ##
+      # Create and load a RDF::Repository to be used as statements cache
+      # for the life duration of this object.
+      #
+      # @private
+      def init_repository_for_statements()
+        if @statements.nil?
+          @statements = RDF::Repository.new
+          self.class.repository_or_fail.query(:subject => @subject).each do | statement |
+            @statements.insert(statement)
+          end
+        end
+        @statements
+      end
+
+      ##
       # Load this instance's attributes.  Overwrite loaded values with attributes in the given options.
       #
       # @return [Hash{Symbol => Any}] attributes
@@ -80,11 +95,7 @@ module Spira
       def reload_attributes()
         attributes = {}
 
-        # Load this object's statements cache
-        @statements = RDF::Repository.new
-        self.class.repository_or_fail.query(:subject => @subject).each do | statement |
-          @statements.insert(statement)
-        end
+        init_repository_for_statements
 
         # Set attributes for each statement corresponding to a predicate
         self.class.properties.each do |name, property|
@@ -485,7 +496,7 @@ module Spira
       # @see http://rdf.rubyforge.org/RDF/Enumerable.html
       # @return [Enumerator]
       def data
-        @statements = self.class.repository.query(:subject => @subject) if @statements.nil?
+        init_repository_for_statements
         @statements
       end
 
