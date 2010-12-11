@@ -24,12 +24,18 @@ module Spira
       #
       # @return [RDF::URI]
       attr_reader :subject
+      
+      ##
+      # This instance's context (named graph).
+      #
+      # @return [RDF::URI]
+      attr_reader :context
 
       ## 
       # Initialize a new Spira::Resource instance of this resource class using
       # a new blank node subject.  Accepts a hash of arguments for initial
-      # attributes.  To use a URI or existing blank node as a subject, use
-      # {Spira::Resource::ClassMethods#for} instead.
+      # attributes.  To use a URI or existing blank node as a subject, or to
+      # specify a context, use {Spira::Resource::ClassMethods#for} instead.
       #
       # @param [Hash{Symbol => Any}] opts Default attributes for this instance
       # @yield [self] Executes a given block and calls `#save!`
@@ -39,6 +45,7 @@ module Spira
       # @see RDF::Node#as
       def initialize(opts = {})
         @subject = opts[:_subject] || RDF::Node.new
+        @context = opts[:_context]
         reload(opts)
         if block_given?
           yield(self)
@@ -87,7 +94,7 @@ module Spira
         self.class.properties.each do |name, property|
           if self.class.is_list?(name)
             values = Set.new
-            collection = @data.query(:subject => @subject, :predicate => property[:predicate]) unless @data.empty?
+            collection = @data.query(:subject => @subject, :predicate => property[:predicate], :context => @context) unless @data.empty?
             unless collection.nil?
               collection.each do |statement|
                 values << self.class.build_value(statement,property[:type], @cache)
@@ -95,7 +102,7 @@ module Spira
             end
             attributes[name] = values
           else
-            statement = @data.query(:subject => @subject, :predicate => property[:predicate]).first unless @data.empty?
+            statement = @data.query(:subject => @subject, :predicate => property[:predicate], :context => @context).first unless @data.empty?
             attributes[name] = self.class.build_value(statement, property[:type], @cache)
           end
         end
@@ -123,7 +130,7 @@ module Spira
       # @private
       def _destroy_attributes(attributes, opts = {})
         repository = repository_for_attributes(attributes)
-        repository.insert([@subject, RDF.type, self.class.type]) if (self.class.type && opts[:destroy_type])
+        repository.insert(RDF::Statement.new(@subject, RDF.type, self.class.type, :context => @context)) if (self.class.type && opts[:destroy_type])
         self.class.repository_or_fail.delete(*repository)
       end
  
@@ -146,9 +153,9 @@ module Spira
           when nil
             _destroy_attributes(attributes, :destroy_type => true) != nil
           when :subject
-            self.class.repository_or_fail.delete([subject, nil, nil]) != nil
+            self.class.repository_or_fail.delete(RDF::Statement.new(subject, nil, nil, :context => @context)) != nil
           when :object
-            self.class.repository_or_fail.delete([nil, nil, subject]) != nil
+            self.class.repository_or_fail.delete(RDF::Statement.new(nil, nil, subject, :context => @context)) != nil
           when :completely
             destroy!(:subject) && destroy!(:object)
         end
@@ -228,22 +235,22 @@ module Spira
       def _update!
         self.class.properties.each do |property, predicate|
           if dirty?(property)
-            self.class.repository_or_fail.delete([subject, predicate[:predicate], nil])
+            self.class.repository_or_fail.delete(RDF::Statement.new(subject, predicate[:predicate], nil, :context => @context))
             if self.class.is_list?(property)
               repo = RDF::Repository.new
               attribute_get(property).each do |value|
-                repo << RDF::Statement.new(subject, predicate[:predicate], self.class.build_rdf_value(value, self.class.properties[property][:type]))
+                repo << RDF::Statement.new(subject, predicate[:predicate], self.class.build_rdf_value(value, self.class.properties[property][:type]), :context => @context)
               end
               self.class.repository_or_fail.insert(*repo)
             else
-              self.class.repository_or_fail.insert(RDF::Statement.new(subject, predicate[:predicate], self.class.build_rdf_value(attribute_get(property), self.class.properties[property][:type]))) unless attribute_get(property).nil?
+              self.class.repository_or_fail.insert(RDF::Statement.new(subject, predicate[:predicate], self.class.build_rdf_value(attribute_get(property), self.class.properties[property][:type]), :context => @context)) unless attribute_get(property).nil?
             end
           end
           @attributes[:original][property] = attribute_get(property)
           @dirty[property] = nil
           @attributes[:copied][property] = NOT_SET
         end
-        self.class.repository_or_fail.insert(RDF::Statement.new(@subject, RDF.type, type)) unless type.nil?
+        self.class.repository_or_fail.insert(RDF::Statement.new(@subject, RDF.type, type, :context => @context)) unless type.nil?
       end
  
       ## 
@@ -289,7 +296,7 @@ module Spira
       def each(*args, &block)
         return enum_for(:each) unless block_given?
         repository = repository_for_attributes(attributes)
-        repository.insert(RDF::Statement.new(@subject, RDF.type, type)) unless type.nil?
+        repository.insert(RDF::Statement.new(@subject, RDF.type, type, :context => @context)) unless type.nil?
         repository.each(*args, &block)
       end
 
@@ -373,12 +380,12 @@ module Spira
             new = []
             attribute.each do |value|
               value = self.class.build_rdf_value(value, self.class.properties[name][:type])
-              new << RDF::Statement.new(@subject, self.class.properties[name][:predicate], value)
+              new << RDF::Statement.new(@subject, self.class.properties[name][:predicate], value, :context => @context)
             end
             repo.insert(*new)
           else
             value = self.class.build_rdf_value(attribute, self.class.properties[name][:type])
-            repo.insert(RDF::Statement.new(@subject, self.class.properties[name][:predicate], value))
+            repo.insert(RDF::Statement.new(@subject, self.class.properties[name][:predicate], value, :context => @context))
           end
         end
         repo
@@ -485,7 +492,7 @@ module Spira
       def data
         if @data.nil?
           @data = RDF::Repository.new
-          self.class.repository_or_fail.query(:subject => @subject).each do | statement |
+          self.class.repository_or_fail.query(:subject => @subject, :context => @context).each do | statement |
             @data.insert(statement)
           end
         end
@@ -523,7 +530,7 @@ module Spira
         new_subject = self.class.id_for(new_subject)
         update_repository = RDF::Repository.new
         data.each do |statement|
-          update_repository << RDF::Statement.new(new_subject, statement.predicate, statement.object) 
+          update_repository << RDF::Statement.new(new_subject, statement.predicate, statement.object, :context => statement.context) 
         end
         self.class.repository.insert(update_repository)
         new_subject.as(self.class)
@@ -537,10 +544,10 @@ module Spira
       # @return [Spira::Resource, String] new_resource
       def rename!(new_subject)
         new = copy_resource!(new_subject)
-        object_statements = self.class.repository.query(:object => subject)
+        object_statements = self.class.repository.query(:object => subject, :context => @context)
         update_repository = RDF::Repository.new
         object_statements.each do |statement|
-          update_repository << RDF::Statement.new(statement.subject, statement.predicate, new.subject)
+          update_repository << RDF::Statement.new(statement.subject, statement.predicate, new.subject, :context => @context)
         end
         self.class.repository.insert(update_repository)
         destroy!(:completely)

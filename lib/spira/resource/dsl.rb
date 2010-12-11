@@ -46,7 +46,16 @@ module Spira
       def default_vocabulary(uri)
         @default_vocabulary = uri
       end
-
+     
+      ##
+      # The default context for this class.  All repository operations
+      # (query, update) will run in this context (named graph).
+      #
+      # @param  [RDF::Value] value
+      # @return [Void]
+      def default_context(value)
+        @default_context = value
+      end
 
       ## 
       # Add a property to this class.  A property is an accessor field that

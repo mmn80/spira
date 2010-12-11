@@ -50,7 +50,7 @@ module Spira
       # 
       # A class with a base URI may still be projected for any URI, whether or
       # not it uses the given resource class' base URI.
-      #
+      # 
       # @raise [TypeError] if an RDF type is given in the attributes and one is
       # given in the attributes.  
       # @raise [ArgumentError] if a non-URI is given and the class does not
@@ -61,16 +61,26 @@ module Spira
       # @overload for(identifier, attributes = {})
       #   @param [Any] uri The identifier to append to the base URI for this class
       #   @param [Hash{Symbol => Any}] attributes Initial attributes
+      # @overload for(hash, attributes = {})
+      #   @param [Hash{Symbol => Any}] hash A hash with a `:identifier` key pointing to an 
+      # uri or an identifier as above, and `:context` pointing to a [RDF::Value]
+      # to be used as a default context for the object instead of `default_context`
+      #   @param [Hash{Symbol => Any}] attributes Initial attributes
       # @yield [self] Executes a given block and calls `#save!`
       # @yieldparam [self] self The newly created instance
       # @return  [Spira::Resource] The newly created instance
       # @see http://rdf.rubyforge.org/RDF/URI.html
       def for(identifier, attributes = {}, &block)
-        self.project(id_for(identifier), attributes, &block)
+        context = @default_context
+        if identifier.is_a?(Hash)
+          context = identifier[:context]
+          identifier = identifier[:identifier]
+        end
+        self.project(id_for(identifier), context, attributes, &block)
       end
 
       ##
-      # Create a new instance with the given subjet without any modification to
+      # Create a new instance with the given subject without any modification to
       # the given subject at all.  This method exists to provide an entry point
       # for implementing classes that want to create a more intelligent .for
       # and/or .id_for for their given use cases, such as simple string
@@ -83,11 +93,11 @@ module Spira
       # @param [RDF::URI, RDF::Node] subject
       # @param [Hash{Symbol => Any}] attributes Initial attributes
       # @return [Spira::Resource] the newly created instance
-      def project(subject, attributes = {}, &block)
+      def project(subject, context, attributes = {}, &block)
         if !self.type.nil? && attributes[:type]
           raise TypeError, "#{self} has an RDF type, #{self.type}, and cannot accept one as an argument."
         end
-        self.new(attributes.merge(:_subject => subject), &block)
+        self.new(attributes.merge(:_subject => subject, :_context => context), &block)
       end
 
       ##
@@ -157,7 +167,7 @@ module Spira
       # @see Spira::Resource::DSL
       def count
         raise Spira::NoTypeError, "Cannot count a #{self} without a reference type URI." if @type.nil?
-        repository.query(:predicate => RDF.type, :object => @type).subjects.count
+        repository.query(:predicate => RDF.type, :object => @type, :context => @default_context).subjects.count
       end
 
       ##
@@ -198,7 +208,7 @@ module Spira
           when false
             enum_for(:each)
           else
-            repository_or_fail.query(:predicate => RDF.type, :object => @type).each_subject do |subject|
+            repository_or_fail.query(:predicate => RDF.type, :object => @type, :context => @default_context).each_subject do |subject|
               self.cache[subject] ||= self.for(subject)
               block.call(cache[subject])
             end
@@ -222,7 +232,7 @@ module Spira
           include Spira::Resource
         end
         # FIXME: This is clearly brittle and ugly.
-        [:@base_uri, :@default_vocabulary, :@repository_name, :@type].each do |variable|
+        [:@base_uri, :@default_vocabulary, :@repository_name, :@type, :@default_context].each do |variable|
           value = instance_variable_get(variable).nil? ? nil : instance_variable_get(variable).dup
           child.instance_variable_set(variable, value)
         end
